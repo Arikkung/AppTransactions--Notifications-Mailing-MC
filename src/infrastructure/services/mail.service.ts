@@ -1,50 +1,43 @@
 import { Injectable } from '@nestjs/common';
 import { MailServicePort } from '../../domain/ports/mail-service.port';
 import { IMail } from '../../domain/interfaces/IMail';
-import client from '../../config/redis.config';
 import { MailTemplateService } from '../services/mail-template.service';
-import * as nodemailer from 'nodemailer';
+import { channel, QUEUE_NAME } from '../../config/rabbitmq.config';
+import { NodemailerService } from './nodemailer.service';
+import { MailConsumerPort } from 'src/domain/ports/mail-monsumer.port';
 
 @Injectable()
-export class MailService implements MailServicePort {
-  private templateService = new MailTemplateService();
+export class MailService implements MailServicePort, MailConsumerPort {
+  constructor(
+    private readonly templateService: MailTemplateService,
+    private readonly nodemailerService: NodemailerService, // 👈 Inyectamos correctamente
+  ) {}
 
   async sendMail(mail: IMail): Promise<void> {
     const { template, payload } = mail;
-    const htmlContent = await this.templateService.renderTemplate(template, payload);
-  
-    // Agregar el contenido HTML al correo
+    const htmlContent = this.templateService.renderTemplate(template, payload);
+
     const enrichedMail = { ...mail, html: htmlContent };
-  
-    await client.publish('mail_channel', JSON.stringify(enrichedMail));
-  
-    await this.processMail(enrichedMail);
-  }  
 
-  private async processMail(mail: IMail): Promise<void> {
-    try {
-        console.log(`✉️ Enviando correo a ${mail.to}...`);
+    if (channel) {
+      channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify(enrichedMail)), { persistent: true });
+      console.log('📩 Correo encolado en RabbitMQ:', enrichedMail);
+    } else {
+      console.error('❌ Error: RabbitMQ no está disponible');
+    }
+  }
 
-        const transporter = nodemailer.createTransport({
-            service: 'gmail',
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASS,
-            },
-        });
-
-        const htmlContent = this.templateService.renderTemplate(mail.template, mail.payload);
-
-        const info = await transporter.sendMail({
-            from: process.env.EMAIL_USER,
-            to: mail.to,
-            subject: mail.subject,
-            html: htmlContent,
-        });
-
-        console.log('✅ Correo enviado:', info.messageId);
+  async processMail(mail: IMail): Promise<void> {
+    try {      
+      if (typeof mail.payload !== 'string') {
+        mail.payload = JSON.stringify(mail.payload, null, 2);    
+        console.log('📩 Payload recibido:', mail.payload);
+    
+      }
+      await this.nodemailerService.send(mail);
+      console.log('✅ Correo enviado correctamente.');
     } catch (error) {
-        console.error('❌ Error al enviar el correo:', error);
+      console.error('❌ Error al enviar el correo:', error);
     }
   }
 }
