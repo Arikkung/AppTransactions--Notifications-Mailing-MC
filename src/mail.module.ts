@@ -4,6 +4,7 @@ import { MailService } from './infrastructure/services/mail.service';
 import { MailTemplateService } from './infrastructure/services/mail-template.service';
 import { MailController } from './infrastructure/controllers/mail.controller';
 import { NodemailerService } from './infrastructure/services/nodemailer.service';
+import { RedisService } from './infrastructure/services/redis.service';
 
 @Module({
   controllers: [MailController],
@@ -11,6 +12,7 @@ import { NodemailerService } from './infrastructure/services/nodemailer.service'
     MailService,
     MailTemplateService,
     NodemailerService, 
+    RedisService,
     {
       provide: SendMailUseCase,
       useFactory: (mailService: MailService) => new SendMailUseCase(mailService),
